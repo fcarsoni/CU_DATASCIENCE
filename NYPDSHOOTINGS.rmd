@@ -1,0 +1,176 @@
+---
+title: "NYPD Shooting Incident (Historic)"
+author: "F.Emerson"
+date: "2025-09-29"
+output: html_document
+---
+
+First, I began by loading in my packages to the file...
+
+```{r packages}
+library(tidyverse)
+library(lubridate)
+library(dplyr)
+library(modelr)
+library(knitr)
+```
+
+Then, I loaded in the shared url...
+
+```{r get_ju_data}
+url_in <- "https://data.cityofnewyork.us/api/views/833y-fsy8/rows.csv?accessType=DOWNLOAD"
+```
+
+and read the csv file into a variable nypdshootings.
+
+```{r import_data, message = FALSE}
+nypdshootings <- read_csv(url_in)
+```
+
+I then cleaned the data by removing the Incident Key, Jurisdiction Code, Location Description, X_coord, y_coord, and lon_lat columns...
+
+```{r tidy NYPD Data}
+nypdshootings <- nypdshootings %>%
+  select(-"INCIDENT_KEY", -"JURISDICTION_CODE", -"LOCATION_DESC",-"X_COORD_CD", -"Y_COORD_CD", -"Lon_Lat")
+```
+
+and renamed the headers for easier identification
+
+```{r rename headers}
+nypdshootings <- nypdshootings %>%
+  rename(DATE = 'OCCUR_DATE', TIME = 'OCCUR_TIME',  IN_OUT = "LOC_OF_OCCUR_DESC", WHERE = "LOC_CLASSFCTN_DESC", MURDER = "STATISTICAL_MURDER_FLAG", PERP_AGE = "PERP_AGE_GROUP", VIC_AGE = "VIC_AGE_GROUP")
+```
+
+I then removed all NA values where applicable, and changed them to -
+I did the same for (null) and UNKNOWN values
+
+```{r remove na and nulls and unknowns}
+nypdshootings$IN_OUT[is.na(nypdshootings$IN_OUT)] <- "-"
+nypdshootings$WHERE[is.na(nypdshootings$WHERE)] <- "-"
+nypdshootings$PERP_AGE[is.na(nypdshootings$PERP_AGE)] <- "-"
+nypdshootings$PERP_SEX[is.na(nypdshootings$PERP_SEX)] <- "-"
+nypdshootings$PERP_RACE[is.na(nypdshootings$PERP_RACE)] <- "-"
+
+nypdshootings$PERP_AGE[nypdshootings$PERP_AGE == "(null)"] <- "-"
+nypdshootings$PERP_AGE[nypdshootings$PERP_AGE == "UNKNOWN"] <- "-"
+nypdshootings$PERP_SEX[nypdshootings$PERP_SEX == "(null)"] <- "-"
+nypdshootings$PERP_SEX[nypdshootings$PERP_SEX == "UNKNOWN"] <- "-"
+nypdshootings$PERP_RACE[nypdshootings$PERP_RACE == "(null)"] <- "-"
+nypdshootings$PERP_RACE[nypdshootings$PERP_RACE == "UNKNOWN"] <- "-"
+```
+
+I changed the date datatype so it would be a DATE type..
+
+```{r change data type}
+nypdshootings <- nypdshootings %>%
+   mutate(DATE = mdy(DATE))
+```
+
+and added a column in the nypd shootings data for the hour that a shooting occured
+```{r get hourly data}
+nypdshootings <- nypdshootings %>%
+  mutate(hour = hour(TIME))
+
+hourly_data <- nypdshootings %>%
+  group_by(hour) %>%
+  summarise(count = n()) %>%
+  arrange(hour)
+```
+
+I then used this hourly data to create a bar chart that showed the hours that shootings occured most, clearly in the evening between 6 pm and 5 am
+```{r bar charts}
+ggplot(hourly_data, aes(x = hour, y = count)) +
+      geom_bar(stat = "identity", fill = "red") +
+      labs(title = "Shootings By The Hour (NYPD HISTORICAL DATA)", x = "HOUR (24 HOUR CLOCK)", y = "NUMBER OF SHOOTINGS")
+```
+
+I added a column for the boro data as well, to understand how many shootings occured in each boro...
+and created a bar chart to show the # of shootings in each boro
+
+```{r get boro data}
+boro_data <- nypdshootings %>%
+  group_by(BORO) %>%
+  summarise(count = n()) %>%
+  arrange(BORO)
+
+ggplot(boro_data, aes(x = BORO, y = count)) +
+      geom_bar(stat = "identity", fill = "skyblue") +
+      labs(title = "Shootings By Boro (NYPD HISTORICAL DATA)", x = "BORO", y = "NUMBER OF SHOOTINGS")
+```
+
+
+I then did some shooting frequency analysis, where I found the number of shootings per day, per month, and per year, to analyze the most frequent areas...
+I created a bar chart for the daily and monthly shootings and a line chart or the yearly shooting information
+```{r shootings over time}
+shoot_freq <- nypdshootings %>%
+  group_by(DATE) %>%
+  summarise(count = n()) %>%
+  arrange(DATE)
+
+ggplot(shoot_freq, aes(x = DATE, y = count)) +
+      geom_bar(stat = "identity", fill = "red") +
+      labs(title = "Shootings By Day (NYPD HISTORICAL DATA)", x = "DATE", y = "NUMBER OF SHOOTINGS (Per Day)")
+
+monthly_shoot_freq <- shoot_freq %>%
+  group_by(monthly = month(DATE)) %>%
+  summarize(count = n()) %>%
+  arrange(monthly)
+
+ggplot(monthly_shoot_freq, aes(x = monthly, y = count)) +
+      geom_bar(stat = "identity", fill = "red") +
+      labs(title = "Shootings By Month (NYPD HISTORICAL DATA)", x = "Month", y = "NUMBER OF SHOOTINGS (Per Month)")
+
+year_shoot_freq <- shoot_freq %>%
+  group_by(yearly = year(DATE)) %>%
+  summarize(count = n()) %>%
+  arrange(yearly)
+
+ggplot(year_shoot_freq, aes(x = yearly, y = count)) +
+  geom_line(color = "red") + 
+  coord_cartesian(ylim = c(0,400)) +
+  labs(title = "Shootings By Year (NYPD HISTORICAL DATA)",
+       x = "Year",
+       y = "Number Of Shootings") +
+  theme_minimal()
+```
+
+I analyzed the data by gathering the top 25 most frequent days of shootings, and the top months for shootings...
+
+This showed that most shootings occur in the summer / early fall months, and the most shootings per day tend to occur in these same time frames
+```{r analyze}
+top_25_dates <- shoot_freq %>%
+  slice_max(count, n=25)
+print(top_25_dates)
+
+top_months <- monthly_shoot_freq %>%
+  slice_max(count, n=12)
+print(top_months)
+```
+
+I then created a linear model for the data for the daily shooting frequency, and graphed it along with the daily shooting frequency bar chart.
+```{r modeling}
+mod <- lm(count ~ count, data = shoot_freq)
+summary(mod)
+
+ggplot(shoot_freq, aes(x = DATE, y = count)) +
+      geom_bar(stat = "identity", fill = "red") +
+      geom_smooth(method = "lm", se = TRUE, color = "skyblue")
+      labs(title = "Shootings By Day (NYPD HISTORICAL DATA)", x = "DATE", y = "NUMBER OF SHOOTINGS (Per Day)")
+
+```
+
+
+IN CONCLUSION:
+
+I learned many things through the NYPD SHOOTING DATA (Historical) data set. I focused first on which hour had the most shootings, and concluded that most shootings occurred between 6 pm and 5 am. I hypothesized that this would be true, while trying to mitigate any sort of bias related to criminal activity and night time hours.
+
+I then made a graph of the shootings by BORO, and could see that most shootings happened in Brooklyn and the Bronx. I could create bias and presume that Brooklyn and the Bronx are most dangerous, but I made attempts to mitigate this bias by finding our that they both have the highest population of all the Boros, which means that the overall shootings / capita was roughly similar in all the boros even though the frequency was higher in these two boros. 
+
+I then sought out information regarding shooting frequency in terms of day, month, and year. I thought the most useful was monthly information, and found that most of the shootings occurred in the summer / early fall months. There could be biases regarding peoples activities during summer months, but it appears the data shows that there is a tendency for gun violence during these months independent of any bias.  
+
+I finished by fitting a linear model to the daily frequency data, and see that there is an overall downtrend in number of shootings per day, which is a good sign and shows that there is potentially less gun violence overall and less shootings per day, which could be the result of several factors, including increased policing, more gun restrictions, peaceful streets, etc.
+
+Thank you ~ 
+Frankie Carsonie
+Sept 30, 2025
+
