@@ -1,0 +1,322 @@
+---
+title: "COVID19 DATA"
+author: "FRANK CARSONIE"
+date: "2025-09-19"
+output:
+  pdf_document: default
+  html_document: default
+---
+
+# PREFACE
+I reused much of the code that Dr. Jane Wall presented in her lectures with the COVID 19 data for this final project, and have added comments, additional analysis and visualizations, and an additional model to the data for review.
+
+The data presented is a COVID19 dataset from the Johns Hopkins Github site presented in the URL below.
+
+# INTRODUCTION
+Began by loading all the library packages needed for the data manipulation.
+
+```{r packages}
+library(tidyverse)
+library(lubridate)
+library(dplyr)
+library(modelr)
+library(knitr)
+```
+
+# URL LOADING
+Gathered the URL data from the COVID19 master data, with additional confirmed global cases, confirmed global deaths, confirmed US cases, and confirmed US deaths as additional csv's, loaded into a table of url strings.
+```{r get_ju_data}
+url_in <- "https://raw.githubusercontent.com/CSSEGISandData/COVID-19/master/csse_covid_19_data/csse_covid_19_time_series/"
+
+file_names <- c("time_series_covid19_confirmed_global.csv", "time_series_covid19_deaths_global.csv", "time_series_covid19_confirmed_US.csv", "time_series_covid19_deaths_US.csv")
+
+urls<- str_c(url_in,file_names)
+```
+
+# DATA VARIABLE CREATION
+Read the csv data from each of the url strings into specific variables, titles global_cases, global_deaths, US_cases, and US_deaths
+```{r import_data, message = FALSE}
+global_cases <- read_csv(urls[1])
+global_deaths <- read_csv(urls[2])
+US_cases <- read_csv(urls[3])
+US_deaths <- read_csv(urls[4])
+```
+
+
+# GLOBAL DATA CLEAN UP
+Pivoted the table information for global cases and global deaths via Province/State, Country/Region, and Lat, Long information so they would be on a single row, and cleaned up variable types and removed unnecessary columns.
+```{r tidy_global_data}
+global_cases <- global_cases %>% 
+    pivot_longer(cols = -c('Province/State', 'Country/Region', Lat, Long), 
+        names_to = "date", 
+        values_to = "cases") %>%
+    select(-c(Lat,Long))
+
+global_deaths <- global_deaths %>% 
+    pivot_longer(cols = -c('Province/State', 'Country/Region', Lat, Long), 
+        names_to = "date", 
+        values_to = "deaths") %>%
+    select(-c(Lat,Long))
+```
+
+# COMBINE GLOBAL DATA
+Joined the global cases and global deaths tables into one table for ease of manipulation, and changed the date data type to date
+```{r combine_global_data}
+global <- global_cases %>%
+  full_join(global_deaths) %>% 
+  rename(Country_Region = 'Country/Region', Province_State = 'Province/State') %>%
+  mutate(date = mdy(date))
+```
+
+# VIEW SUMMARY GLOBAL
+Viewed a summary of the global data information and made sure to filter out any days where the cases were less than 1 for brevity
+```{r summary}
+summary(global)
+global <- global %>% filter(cases>0) # filter out days with less than 1 case
+```
+
+
+# US DATA CLEAN UP
+Pivoted table information for US cases and US deaths so it would be placed on a single row, and deleted unnecessary lat, long information, while also joining US cases and US deaths into a single variable table titled US
+```{r tidy_US_data}
+US_cases %>%
+  pivot_longer(cols = -(UID:Combined_Key), names_to = "date", values_to = "cases")
+
+US_cases <- US_cases %>%
+  pivot_longer(cols = -(UID:Combined_Key), names_to = "date", values_to = "cases") %>%
+  select(Admin2:cases) %>%
+  mutate(date = mdy(date)) %>%
+  select(-c(Lat, Long_))
+
+US_deaths <- US_deaths %>%
+  pivot_longer(cols = -(UID:Population), names_to = "date", values_to = "deaths") %>%
+  select(Admin2:deaths) %>%
+  mutate(date = mdy(date)) %>%
+  select(-c(Lat, Long_))
+
+US <- US_cases %>% full_join(US_deaths)
+```
+
+# COMBINE POPULATION DATA
+Combined global population data to create clear population information for each province/state and country/region
+```{r combine_population_data}
+global <- global %>%
+  unite("Combined_Key", 
+        c(Province_State, Country_Region),
+        sep = ", ",
+        na.rm = TRUE,
+        remove = FALSE)
+```
+
+
+# US BY STATE
+Grouped US information by state to have a clearer understanding of how COVID19 effected each individual state, gathering the cases, deaths, and population for each state. Additionally, created the US totals to understand how thte US was effected as a whole in terms of deaths per million.
+```{r US_by_state}
+US_by_state <- US %>%
+  group_by(Province_State, Country_Region, date) %>%
+  summarize(cases = sum(cases), deaths = sum(deaths), Population = sum(Population)) %>%
+  mutate(deaths_per_mill = deaths *1000000 / Population) %>%
+  select(Province_State, Country_Region, date, cases, deaths, deaths_per_mill, Population) %>%
+  ungroup()
+
+
+US_totals <- US %>%
+  group_by(Country_Region, date) %>%
+  summarize (cases = sum(cases), deaths = sum(deaths), Population = sum(Population)) %>%
+  mutate(deaths_per_mill = deaths *1000000 / Population) %>%
+  select(Country_Region, date, cases, deaths, deaths_per_mill, Population) %>%
+  ungroup()
+
+```
+
+
+# PLOTTING US COVID CASES AND DEATHS
+Used ggplot to plot COVID19 cases and deaths in the US as a whole and in a specific state, in this case New York, to see how they may have differed in the spread of the disease.
+```{r plots}
+US_totals %>%
+  filter (cases>0) %>%
+  ggplot(aes(x = date, y = cases)) +
+  geom_line(aes(color = "cases")) +
+  geom_point(aes(color = "cases")) +
+  geom_line(aes(y = deaths, color = "deaths")) +
+  geom_point(aes(y=deaths, color = "deaths")) +
+  scale_y_log10() +
+  theme(legend.position = "bottom", axis.text.x = element_text(angle = 90)) +
+  labs(title = "COVID19 in US", y = NULL)
+
+state <- "New York"
+US_by_state %>%
+  filter (Province_State == state) %>%
+  filter (cases > 0) %>%
+  ggplot(aes(x = date, y = cases)) +
+  geom_line(aes(color = "cases")) +
+  geom_point(aes(color = "cases")) +
+  geom_line(aes(y = deaths, color = "deaths")) +
+  geom_point(aes(y=deaths, color = "deaths")) +
+  scale_y_log10() +
+  theme(legend.position = "bottom", axis.text.x = element_text(angle = 90)) +
+  labs(title = str_c("COVID19 in ", state), y = NULL)
+```
+
+# US TOTALS ANALYSIS
+Found the date that was the last date where data was captured in the US
+```{r information}
+max(US_totals$date)
+```
+
+# ANALYZING NEW US CASES
+Defined US State information to analyze the new COVID19 cases and new COVID 19 deaths to see how they were trending new the end of the data collection period
+```{r analyze}
+US_by_state <- US_by_state %>%
+  mutate(new_cases = cases - lag(cases), new_deaths = deaths - lag(deaths))
+US_totals <- US_totals %>%
+  mutate(new_cases = cases - lag(cases), new_deaths = deaths - lag(deaths))
+
+tail(US_totals %>% select(new_cases, new_deaths, everything()))
+```
+
+
+# PLOTTING NEW US CASES
+Plotted the new US cases and deaths for the US as a whole and New York as a state specifically, visualizing how they compared to the total cases previously explored.
+```{r plot}
+US_totals %>%
+  ggplot(aes(x = date, y = new_cases)) +
+  geom_line(aes(color = "new_cases")) +
+  geom_point(aes(color = "new_cases")) +
+  geom_line(aes(y = new_deaths, color = "new_deaths")) +
+  geom_point(aes(y = new_deaths, color = "new_deaths")) +
+  scale_y_log10() +
+  theme(legend.position = "bottom", axis.text.x = element_text(angle = 90)) +
+  labs(title = "COVID19 in US", y = NULL)
+
+state <- "New York"
+US_by_state %>%
+  filter (Province_State == state) %>%
+  filter (cases > 0) %>%
+  ggplot(aes(x = date, y = new_cases)) +
+  geom_line(aes(color = "new_cases")) +
+  geom_point(aes(color = "new_cases")) +
+  geom_line(aes(y = new_deaths, color = "new_deaths")) +
+  geom_point(aes(y= new_deaths, color = "new_deaths")) +
+  scale_y_log10() +
+  theme(legend.position = "bottom", axis.text.x = element_text(angle = 90)) +
+  labs(title = str_c("COVID19 in ", state), y = NULL)
+```
+
+# ANALYZED DEATHS PER THOUSAND PEOPLE IN EACH STATE
+Used the previous information to create a table showing the deaths per thousand for each state in the US. Proceeded to analyze the states with the min and max deaths per thousand to better understand which states were hit the hardest or the least hard in relation to their population density.
+```{r analyze deaths/thousand}
+US_state_totals <- US_by_state %>%
+  group_by(Province_State) %>%
+  summarize(deaths = max(deaths), cases= max(cases), 
+            population = max(Population), 
+            cases_per_thou = 1000 * cases / population,
+            deaths_per_thou = 1000 * deaths / population) %>%
+  filter (cases > 0, population > 0)
+
+US_state_totals %>%
+  slice_min(deaths_per_thou, n=10) %>%
+  select(deaths_per_thou, cases_per_thou, everything())
+
+US_state_totals %>%
+  slice_max(deaths_per_thou, n=10) %>%
+  select(deaths_per_thou, cases_per_thou, everything())
+```
+
+# MODELED
+Ran a basic model comparing deaths per thou to cases per thou for US totals, which related the number of deaths to the number of cases. Used this information to create a prediction model relating these two factors, to understand how the number of cases affected the number of deaths. It was rather clear that their tends to be a linear correlation between the two factors.
+```{r modeling}
+mod <- lm(deaths_per_thou ~ cases_per_thou, data = US_state_totals)
+summary(mod)
+
+US_state_totals %>% slice_min(cases_per_thou)
+US_state_totals %>% slice_max(cases_per_thou)
+
+US_state_totals %>% mutate(pred = predict(mod))
+
+US_tot_w_pred <- US_state_totals %>% mutate(pred = predict(mod))
+
+US_tot_w_pred %>% ggplot() +
+  geom_point(aes(x = cases_per_thou, y = deaths_per_thou), color = "blue") +
+  geom_point(aes(x = cases_per_thou, y = pred), color = "red")
+```
+
+
+# THE END OF DR. JANE WALL CLASS WORK
+This marks the end of the material discussed and worked through with Dr. Jane Walls lectures. From here on, I will include additional visualizations, analysis, and models that interested me regarding the COVID19 data set, and any bias that may have been present in investigations.
+
+
+# ADDITIONAL PERSONAL ANALYSIS
+Began by counting the number of cases and number of deaths per year during the COVID19 Pandemic, and joining that into its own data set
+```{r group yearly covid data}
+yearly_cases <- US_totals %>%
+  group_by(yearly = year(date)) %>%
+  summarize(count_cases = sum(cases)) %>%
+  arrange(yearly)
+
+yearly_deaths <- US_totals %>%
+  group_by(yearly = year(date)) %>%
+  summarize(count_deaths = sum(deaths)) %>%
+  arrange(yearly)
+
+yearly_counts <- yearly_cases %>% full_join(yearly_deaths)
+```
+
+# PLOTTING YEARLY DATA
+I then plotted the yearly cases and the yearly deaths on different graphs and the same graph to try and get a visualization of the difference. It became clear that the trend of deaths and cases is almost the same in terms of visualization, but they are about 100x more cases than deaths.
+```{r plotting yearly covid data}
+ggplot(yearly_counts, aes(x = yearly, y = count_cases)) +
+      geom_bar(stat = "identity", fill = "red") +
+      labs(title = "Yearly COVID Cases", x = "Year", y = "Count CASES")
+
+ggplot(yearly_counts, aes(x = yearly, y = count_deaths)) +
+      geom_bar(stat = "identity", fill = "blue") +
+      labs(title = "Yearly COVID Deaths", x = "Year", y = "Count DEATHS")
+
+yearly_long <- yearly_counts %>% pivot_longer(!yearly, names_to = "Type", values_to = "Count")
+
+ggplot(yearly_long, aes(x = yearly, y = Count, fill = Type)) +
+  geom_bar(position = position_dodge(0.5), stat = "identity") +
+  labs(title = "Yearly COVID Cases and Deaths", x = "Year", y = "Death / Cases")
+```
+
+
+# CREATED COLUMM FOR PERCENTAGE OF DEATHS
+I then added a column in yearly counts to determine the percentage of deaths in relation to the total number of cases. I thought that this would help determine how effectively we are handling treatment of the cases over time and whether we are seeing increased immunity and caregiving.
+I then plotted this percentage of deaths in a bar chart for visualization.
+```{r plotted the percentage of deaths to cases}
+yearly_counts <- yearly_counts %>%
+  mutate(percent_deaths = (count_deaths)*100/count_cases)
+
+ggplot(yearly_counts, aes(x = yearly, y = percent_deaths)) +
+      geom_bar(stat = "identity", fill = "red") +
+      labs(title = "Yearly COVID Percent Deaths of Total Cases", x = "Year", y = "Percent Deaths")
+```
+
+# MODELING DEATH PERCENTAGE YEAR OVER YEAR
+Finally, I created a linear model to predict the percentage of deaths in relation to the total cases over the years, to help see whether the trend was moving down over time. After analyzing the data and creating a visualization showing the year over year percentage and prediction, it became clear that the overall percentage of deaths is trending downwards, which is a positive sign for our prevention and handling of the COVID19 disease.
+```{r modeling percent deaths per year}
+mod <- lm(percent_deaths ~ yearly, data = yearly_counts)
+summary(mod)
+
+yearly_counts <- yearly_counts %>% mutate(pred_death_perc = predict(mod))
+
+yearly_counts %>% 
+  ggplot(aes(x = yearly, y = percent_deaths)) +
+  geom_line(aes(color = "percent_deaths")) +
+  geom_point(aes(color = "percent_deaths")) +
+  geom_line(aes(y = pred_death_perc, color = "pred_death_perc")) +
+  geom_point(aes(y = pred_death_perc, color = "pred_death_perc")) +
+  coord_cartesian(ylim = c(0,3))
+```
+
+
+# CONCLUSION
+
+Through my investigations in the COVID 19 pandemic, I learned about the overall trend of the disease globally, in the US, and state specific. The Johns Hopkins data set was very thorough, and I was able ot manipulate the initial part of the data set through Dr. Jane Wall's guidance in the course lectures to create foundational analysis regarding the data. It was clear that the number of cases trended up exponentially as the disease spread, and that individual state saw a similar spread as the US as a whole. It was also very interesting to analyze the states that were impacted the most and the least throughout the years of the pandemic, and understand how the new cases and new deaths were showing improvement in our treatment of the disease.
+
+The additional analysis and visualizations I created focused on the yearly COVID19 cases and deaths, and the percentage of deaths in relation to the total number of cases. This helped to illuminate how deadly the disease was overall, which would indicate the severity, treatment practices, immunity, and other factors that could lead to a more stable spread. It was determined through modeling that the percent of deaths is trending downwards over the years, which would indicate a strong response to COVID19 and the ability for people to interact again, while taking precautions to not unecessarily spread the disease. 
+
+I held several biases in the investigations of this data that I would like to address. Firstly, I was concerned about the overall severity of the disease and felt that it didn't match the social constraints placed on people at the time. That led me to question the death rate as a percentage, and to understand which states experienced the most deaths over time. It became clear that the percentage of deaths as 1/100 is rather high for any highly transmittable disease, which was helpful in my understanding of the actions put in place during the pandemic. Additionally, I was potentially biased in my search for reasons why the pandemic went on so long through a yearly understanding of the data. I graduated undergrad in the spring of 2020, and personally felt constrained at what could have been a very opportunistic time of life. This research helped to mitigate certain biases regarding my understanding of the severity of the disease overall and the reasons for lockdown.
+
+Thank you ~ Frankie Carsonie ~ 10/1/2025
